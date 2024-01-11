@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="https://unpkg.com/petite-vue"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+</head>
+
+<body>
+    <!-- v-scope value can be omitted -->
+    <div v-scope>
+        <div>
+            <h2>Send Tx</h2>
+            <form action="/send/" @submit.prevent="sendTx" method="post">
+                <div><label for="to">To</label><input type="text" name="to" id="to"></div>
+                <div><label for="amount">Amount</label><input type="number" name="amount" id="amount"></div>
+                <div><button type="submit">Send</button></div>
+            </form>
+        </div>
+
+    </div>
+    <script src="/js/main.js">
+    </script>
+</body>
+
+</html>
