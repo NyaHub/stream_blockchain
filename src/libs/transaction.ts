@@ -1,4 +1,4 @@
-import { sha256 } from "../utils";
+import { SHA256 } from "../utils";
 
 export class Transaction {
     public sign: string;
@@ -6,13 +6,14 @@ export class Transaction {
         public from: string,
         public to: string,
         public amount: number,
-        public data: string = ""
+        public data: string = "",
+        public timestamp: number = new Date().getTime()
     ) {
         this.sign = ""
     }
 
     get hash() {
-        return sha256(JSON.stringify({
+        return SHA256(JSON.stringify({
             from: this.from,
             to: this.to,
             amount: this.amount,

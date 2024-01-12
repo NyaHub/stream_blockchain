@@ -1,6 +1,8 @@
 import { createSign, generateKeyPairSync } from "crypto"
 import { Blockchain } from "./bockchain"
 import { Transaction } from "./transaction"
+import { ec as EC } from "elliptic"
+import { SHA256 } from "../utils"
 
 export interface IUser {
     addr: string,
@@ -15,60 +17,50 @@ interface IKeyPair {
 }
 
 export class User {
-    public keypair: IKeyPair
+    public keypair: EC.KeyPair
     public addr: string
 
     constructor(public chain: Blockchain) {
-        let keypair = generateKeyPairSync('rsa', {
-            modulusLength: 2048,
-            publicKeyEncoding: { type: 'spki', format: 'pem' },
-            privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-        })
+        let ec = new EC('secp256k1');
 
-        this.keypair = {
-            public: keypair.publicKey.toString(),
-            private: keypair.privateKey.toString()
-        }
+        this.keypair = ec.genKeyPair()
 
-        this.addr = this.generateAddress()
+        let pkh = this.keypair.getPublic("array")
+
+        this.addr = this.generateAddress(pkh)
     }
 
     get balance() {
         return this.chain.getBalance(this.addr)
     }
 
-    private generateAddress() {
-        let tmp = this.keypair.public.split("\n")
-        tmp.pop()
-        tmp.shift()
+    generateAddress(pk: number[]) {
 
-        let tmpb = Buffer.from(tmp.join(""), "base64")
+        let tmpb = pk.slice()
         let a = tmpb.slice(0, tmpb.length / 2)
         let b = tmpb.slice(tmpb.length / 2, tmpb.length)
-        tmpb = Buffer.from(a.map((v, i) => v ^ b[i]))
+        tmpb = a.map((v, i) => v ^ b[i])
 
-        for (let i = 0; i < 2; i++) {
-            a = tmpb.slice(0, tmpb.length / 2)
-            b = tmpb.slice(tmpb.length / 2, tmpb.length)
-            tmpb = Buffer.from(a.map((v, i) => v ^ b[i]))
-        }
+        a = tmpb.slice(0, tmpb.length / 2)
+        b = tmpb.slice(tmpb.length / 2, tmpb.length)
+        tmpb = a.map((v, i) => v ^ b[i])
 
-        return tmpb.toString("hex")
+        return tmpb.map((v, i) => v.toString(16)).join("")
     }
 
-    sing(data: any) {
-        let sing = createSign("SHA256")
-        sing.update(data.toString())
-        return sing.sign(this.keypair.private).toString("hex")
+    sign(data: any) {
+        let hash = SHA256(JSON.stringify(data))
+        let sign = this.keypair.sign(hash)
+        return sign.toDER("hex")
     }
 
     sendMoney(to: string, amount: number) {
-        if (amount > this.balance) {
+        if (amount > this.balance.balance) {
             throw Error("amount > balnce")
         }
         let tx = new Transaction(this.addr, to, amount)
-        tx.sign = this.sing(tx)
+        tx.sign = this.sign(tx)
 
-        this.chain.addTx(tx, this.keypair.public)
+        let r = this.chain.addTx(tx, this.keypair.getPublic("hex"))
     }
 }

@@ -1,5 +1,5 @@
 import MerkleTree from "merkletreejs"
-import { sha256 } from "../utils"
+import { SHA256 } from "../utils"
 import { Transaction } from "./transaction"
 
 export interface Blk {
@@ -14,6 +14,7 @@ export class Block {
     constructor(
         public prevHash: string,
         public data: Transaction[],
+        public index: number,
         public timestamp: number = new Date().getTime()
     ) {
         this.mekleRoot = this.getMerkleRoot()
@@ -21,21 +22,22 @@ export class Block {
 
     getMerkleRoot() {
         let leaves = this.data.map(ts => ts.hash)
-        let tree = new MerkleTree(leaves, sha256)
+        let tree = new MerkleTree(leaves, SHA256)
         return tree.getRoot().toString("hex")
     }
 
     get header() {
         return {
             prevHash: this.prevHash,
+            index: this.index,
             timestamp: this.timestamp,
             nonce: this.nonce,
-            merkleRoot: this.mekleRoot
+            merkleRoot: this.mekleRoot,
         }
     }
 
     get hash() {
-        return sha256(JSON.stringify(this.header))
+        return SHA256(JSON.stringify(this.header))
     }
 
     public toString(str: string = "") {

@@ -7,28 +7,30 @@ exports.Block = void 0;
 const merkletreejs_1 = __importDefault(require("merkletreejs"));
 const utils_1 = require("../utils");
 class Block {
-    constructor(prevHash, data, timestamp = new Date().getTime()) {
+    constructor(prevHash, data, index, timestamp = new Date().getTime()) {
         this.prevHash = prevHash;
         this.data = data;
+        this.index = index;
         this.timestamp = timestamp;
         this.nonce = 0; // Math.floor(Math.random() * 999999)
         this.mekleRoot = this.getMerkleRoot();
     }
     getMerkleRoot() {
         let leaves = this.data.map(ts => ts.hash);
-        let tree = new merkletreejs_1.default(leaves, utils_1.sha256);
+        let tree = new merkletreejs_1.default(leaves, utils_1.SHA256);
         return tree.getRoot().toString("hex");
     }
     get header() {
         return {
             prevHash: this.prevHash,
+            index: this.index,
             timestamp: this.timestamp,
             nonce: this.nonce,
-            merkleRoot: this.mekleRoot
+            merkleRoot: this.mekleRoot,
         };
     }
     get hash() {
-        return (0, utils_1.sha256)(JSON.stringify(this.header));
+        return (0, utils_1.SHA256)(JSON.stringify(this.header));
     }
     toString(str = "") {
         return JSON.stringify({

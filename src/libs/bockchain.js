@@ -1,9 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Blockchain = void 0;
-const crypto_1 = require("crypto");
 const block_1 = require("./block");
 const transaction_1 = require("./transaction");
+const elliptic_1 = require("elliptic");
+const utils_1 = require("../utils");
+const db_1 = require("./db");
+let ec = new elliptic_1.ec('secp256k1');
 const STORGE = "storage";
 const me = "it's me";
 const minerReward = 100;
@@ -13,12 +16,26 @@ class Blockchain {
         this.chain = [];
         this.users = {};
         this.mempool = [];
-        this.addTx(this.createGenesis(), "");
+        this.db = (0, db_1.initDB)('sqlite:chain.sqlite');
+        this.db.sync();
+        this.db.models.Block.findOne({
+            order: [['createdAt', 'DESC']]
+        }).then((d) => {
+            if (d != null) {
+                let blk = new block_1.Block(d.dataValues.prevHash, [], d.dataValues.index, d.dataValues.timestamp);
+            }
+            else {
+                this.addTx(this.createGenesis(), "");
+            }
+        });
     }
     createGenesis() {
         return new transaction_1.Transaction(STORGE, me, 0, "this is genesis block");
     }
     getLastBlock() {
+        if (this.chain.length == 0) {
+            return new block_1.Block("", [], 0);
+        }
         return this.chain[this.chain.length - 1];
     }
     pow(blk) {
@@ -37,14 +54,32 @@ class Blockchain {
     }
     addBlock(miner) {
         let phash = this.getLastBlock() ? this.getLastBlock().hash : "";
-        let block = new block_1.Block(phash, this.mempool.slice());
+        let block = new block_1.Block(phash, this.mempool.slice(), this.getLastBlock().index + 1);
         block = this.pow(block);
-        this.mempool = this.mempool.filter((tx) => {
-            for (let i of block.data) {
-                if (i.hash === tx.hash)
-                    return false;
-            }
-            return false;
+        this.db.models.Block.create({
+            index: block.index,
+            nonce: block.nonce,
+            mekleRoot: block.mekleRoot,
+            prevHash: block.prevHash,
+            timestamp: block.timestamp,
+        }).then(blk => {
+            this.mempool = this.mempool.filter((tx) => {
+                for (let i of block.data) {
+                    if (i.hash === tx.hash) {
+                        this.db.models.Transaction.create({
+                            sign: tx.sign,
+                            from: tx.from,
+                            to: tx.to,
+                            amount: tx.amount,
+                            data: tx.data,
+                            timestamp: tx.timestamp,
+                            BlockId: blk.dataValues.id
+                        });
+                        return false;
+                    }
+                }
+                return false;
+            });
         });
         for (let tx of block.data) {
             this.users[tx.from].lockedOut -= tx.amount;
@@ -54,10 +89,10 @@ class Blockchain {
         this.addTx(new transaction_1.Transaction(STORGE, miner, minerReward, "REWARD"), "");
         this.chain.push(block);
     }
-    verifySign(data, sign, key) {
-        const verify = (0, crypto_1.createVerify)('SHA256');
-        verify.update(data.toString());
-        return verify.verify(key, sign);
+    verifySign(data, sign, pub) {
+        let key = ec.keyFromPublic(pub, 'hex');
+        let hash = (0, utils_1.SHA256)(JSON.stringify(data));
+        return key.verify(hash, sign);
     }
     addTx(tx, key) {
         if (!this.users[tx.from]) {
@@ -89,8 +124,8 @@ class Blockchain {
     }
     getBalance(addr) {
         if (!this.users[addr])
-            return 0;
-        return this.users[addr].balance;
+            return { balance: 0, lockedOut: 0, lockedIn: 0, addr };
+        return this.users[addr];
     }
     toString(str = "") {
         let chain = [];

@@ -2,6 +2,12 @@ import { createVerify } from "crypto"
 import { Blk, Block } from "./block"
 import { Transaction } from "./transaction"
 import { IUser } from "./user"
+import { ec as EC } from "elliptic"
+import { SHA256 } from "../utils"
+import { Sequelize } from "sequelize"
+import { initDB } from "./db"
+
+let ec = new EC('secp256k1')
 
 const STORGE = "storage"
 const me = "it's me"
@@ -11,9 +17,26 @@ export class Blockchain {
     public chain: Block[] = []
     public users: { [index: string]: IUser } = {}
     private mempool: Transaction[] = []
+    private db: Sequelize
 
     constructor(public diff: number = 2) {
-        this.addTx(this.createGenesis(), "")
+        this.db = initDB('sqlite:chain.sqlite')
+        this.db.sync()
+
+        this.db.models.Block.findOne({
+            order: [['createdAt', 'DESC']]
+        }).then((d) => {
+            if (d != null) {
+                let blk = new Block(
+                    d.dataValues.prevHash,
+                    [],
+                    d.dataValues.index,
+                    d.dataValues.timestamp
+                )
+            } else {
+                this.addTx(this.createGenesis(), "")
+            }
+        })
     }
 
     private createGenesis() {
@@ -21,6 +44,13 @@ export class Blockchain {
     }
 
     public getLastBlock() {
+        if (this.chain.length == 0) {
+            return new Block(
+                "",
+                [],
+                0,
+            )
+        }
         return this.chain[this.chain.length - 1]
     }
 
@@ -46,16 +76,36 @@ export class Blockchain {
         let phash = this.getLastBlock() ? this.getLastBlock().hash : ""
         let block = new Block(
             phash,
-            this.mempool.slice()
+            this.mempool.slice(),
+            this.getLastBlock().index + 1
         )
 
         block = this.pow(block)
 
-        this.mempool = this.mempool.filter((tx) => {
-            for (let i of block.data) {
-                if (i.hash === tx.hash) return false
-            }
-            return false
+        this.db.models.Block.create({
+            index: block.index,
+            nonce: block.nonce,
+            mekleRoot: block.mekleRoot,
+            prevHash: block.prevHash,
+            timestamp: block.timestamp,
+        }).then(blk => {
+            this.mempool = this.mempool.filter((tx) => {
+                for (let i of block.data) {
+                    if (i.hash === tx.hash) {
+                        this.db.models.Transaction.create({
+                            sign: tx.sign,
+                            from: tx.from,
+                            to: tx.to,
+                            amount: tx.amount,
+                            data: tx.data,
+                            timestamp: tx.timestamp,
+                            BlockId: blk.dataValues.id
+                        })
+                        return false
+                    }
+                }
+                return false
+            })
         })
 
         for (let tx of block.data) {
@@ -74,10 +124,10 @@ export class Blockchain {
         this.chain.push(block)
     }
 
-    public verifySign(data: any, sign: string, key: string) {
-        const verify = createVerify('SHA256')
-        verify.update(data.toString())
-        return verify.verify(key, sign)
+    public verifySign(data: any, sign: string, pub: string) {
+        let key = ec.keyFromPublic(pub, 'hex')
+        let hash = SHA256(JSON.stringify(data))
+        return key.verify(hash, sign)
     }
 
     public addTx(tx: Transaction, key: string) {
@@ -112,9 +162,9 @@ export class Blockchain {
         this.mempool.push(tx)
     }
 
-    public getBalance(addr: string): number {
-        if (!this.users[addr]) return 0
-        return this.users[addr].balance
+    public getBalance(addr: string): IUser {
+        if (!this.users[addr]) return { balance: 0, lockedOut: 0, lockedIn: 0, addr }
+        return this.users[addr]
     }
 
     public toString(str: string = "") {

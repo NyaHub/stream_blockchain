@@ -6,12 +6,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document</title>
     <script src="https://unpkg.com/petite-vue"></script>
-    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/elliptic/6.5.4/elliptic.min.js"
+        integrity="sha512-78ON1nQI4R5btOF/cPVb/msINn8P3K6yJ7n29r4J0M4SBLhTDmFqZgNQ7htZM16539xPvQDywpTdJaQPxuXxGw=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <style>
+        .addr {
+            font-family: monospace;
+        }
+    </style>
 </head>
 
 <body>
-    <!-- v-scope value can be omitted -->
-    <div v-scope>
+    <div v-scope @vue:mounted="mounted">
+        <div>
+            <h1 class="addr">{{store.user.addr}}</h1>
+            <div>
+                balance: <span>{{store.user.balance.balance}}</span><br>
+                lockedIn: <span>{{store.user.balance.lockedIn}}</span><br>
+                lockedOut: <span>{{store.user.balance.lockedOut}}</span>
+            </div>
+            <button @click="getMoney">Get money</button>
+        </div>
         <div>
             <h2>Send Tx</h2>
             <form action="/send/" @submit.prevent="sendTx" method="post">
@@ -20,8 +35,15 @@
                 <div><button type="submit">Send</button></div>
             </form>
         </div>
-
+        <div>
+            <div v-for="u of store.users">
+                <span class="addr">{{u.addr}}</span> - <span>{{u.balance}}</span>
+            </div>
+        </div>
     </div>
+    <script src="/js/utils.js"></script>
+    <script src="/js/transaction.js"></script>
+    <script src="/js/chain.js"></script>
     <script src="/js/main.js">
     </script>
 </body>
