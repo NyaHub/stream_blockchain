@@ -1,16 +1,17 @@
 import { DataTypes, Model, Sequelize } from "sequelize";
 import sequelize from "sequelize/types/sequelize";
 
-interface BlockModel extends Model {
+export interface BlockModel extends Model {
     id: number
     index: number
     nonce: number
-    mekleRoot: string
+    merkleRoot: string
     prevHash: string
     timestamp: number
+    hash: string
 }
 
-interface TransactionModel extends Model {
+export interface TransactionModel extends Model {
     id: number
     sign: string
     from: string
@@ -18,6 +19,8 @@ interface TransactionModel extends Model {
     amount: number
     data: string
     timestamp: number
+    hash: string
+    seed: number
 }
 
 export function initDB(seqOpts: any) {
@@ -25,19 +28,28 @@ export function initDB(seqOpts: any) {
 
     let block = db.define<BlockModel>("Block", {
         id: {
-            type: DataTypes.INTEGER.UNSIGNED,
+            type: DataTypes.INTEGER,
+            autoIncrement: true,
             primaryKey: true
         },
-        index: DataTypes.INTEGER.UNSIGNED,
+        index: {
+            type: DataTypes.INTEGER.UNSIGNED,
+            unique: true
+        },
         nonce: DataTypes.INTEGER.UNSIGNED,
-        mekleRoot: DataTypes.STRING,
+        merkleRoot: DataTypes.STRING,
         prevHash: DataTypes.STRING,
-        timestamp: DataTypes.INTEGER.UNSIGNED
+        timestamp: DataTypes.INTEGER.UNSIGNED,
+        hash: {
+            type: DataTypes.STRING,
+            unique: true
+        }
     })
 
     let transaction = db.define<TransactionModel>("Transaction", {
         id: {
-            type: DataTypes.INTEGER.UNSIGNED,
+            type: DataTypes.INTEGER,
+            autoIncrement: true,
             primaryKey: true
         },
         sign: DataTypes.STRING,
@@ -45,11 +57,16 @@ export function initDB(seqOpts: any) {
         to: DataTypes.STRING,
         amount: DataTypes.FLOAT,
         data: DataTypes.STRING,
-        timestamp: DataTypes.INTEGER.UNSIGNED
+        timestamp: DataTypes.INTEGER.UNSIGNED,
+        hash: {
+            type: DataTypes.STRING,
+            unique: true
+        },
+        seed: DataTypes.INTEGER
     })
 
     block.hasMany(transaction)
-    transaction.hasOne(block)
+    transaction.belongsTo(block)
 
     return db
 }

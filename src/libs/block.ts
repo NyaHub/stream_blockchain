@@ -9,7 +9,7 @@ export interface Blk {
 
 export class Block {
     public nonce: number = 0 // Math.floor(Math.random() * 999999)
-    public mekleRoot: string
+    public merkleRoot: string
 
     constructor(
         public prevHash: string,
@@ -17,7 +17,7 @@ export class Block {
         public index: number,
         public timestamp: number = new Date().getTime()
     ) {
-        this.mekleRoot = this.getMerkleRoot()
+        this.merkleRoot = this.getMerkleRoot()
     }
 
     getMerkleRoot() {
@@ -32,7 +32,7 @@ export class Block {
             index: this.index,
             timestamp: this.timestamp,
             nonce: this.nonce,
-            merkleRoot: this.mekleRoot,
+            merkleRoot: this.merkleRoot,
         }
     }
 

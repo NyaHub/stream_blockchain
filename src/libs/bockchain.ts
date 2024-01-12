@@ -4,54 +4,58 @@ import { Transaction } from "./transaction"
 import { IUser } from "./user"
 import { ec as EC } from "elliptic"
 import { SHA256 } from "../utils"
-import { Sequelize } from "sequelize"
-import { initDB } from "./db"
+import { Model, Sequelize } from "sequelize"
+import { BlockModel, initDB } from "./db"
+import { error } from "console"
 
 let ec = new EC('secp256k1')
 
 const STORGE = "storage"
+const STORGE_BALANCE = 1000000000
 const me = "it's me"
 const minerReward = 100
 
+const STORGE_WALLET = {
+    addr: STORGE,
+    balance: STORGE_BALANCE,
+    lockedIn: 0,
+    lockedOut: 0
+}
+
 export class Blockchain {
-    public chain: Block[] = []
-    public users: { [index: string]: IUser } = {}
+    public chain: Block = new Block("", [], 0)
+    public users: { [index: string]: IUser } = { [STORGE]: STORGE_WALLET }
     private mempool: Transaction[] = []
     private db: Sequelize
 
     constructor(public diff: number = 2) {
         this.db = initDB('sqlite:chain.sqlite')
-        this.db.sync()
+    }
 
-        this.db.models.Block.findOne({
-            order: [['createdAt', 'DESC']]
-        }).then((d) => {
-            if (d != null) {
-                let blk = new Block(
-                    d.dataValues.prevHash,
-                    [],
-                    d.dataValues.index,
-                    d.dataValues.timestamp
-                )
-            } else {
-                this.addTx(this.createGenesis(), "")
-            }
-        })
+    async init(cb: () => void) {
+        this.db.sync({ force: true }).then(() => {
+            this.db.models.Block.findOne({
+                order: [['createdAt', 'DESC']]
+            }).then(async (d) => {
+                if (d != null) {
+                    let blk = await this.restoreBlock(d)
+
+                    if (blk != null) { this.chain = blk }
+                    { this.createGenesis() }
+                } else {
+                    this.createGenesis()
+                }
+                cb()
+            }).catch(console.log)
+        }).catch(console.log)
     }
 
     private createGenesis() {
-        return new Transaction(STORGE, me, 0, "this is genesis block")
+        this.addTx(new Transaction(STORGE, me, 100, "this is genesis block"), "")
     }
 
     public getLastBlock() {
-        if (this.chain.length == 0) {
-            return new Block(
-                "",
-                [],
-                0,
-            )
-        }
-        return this.chain[this.chain.length - 1]
+        return this.chain
     }
 
     public pow(blk: Block) {
@@ -72,8 +76,8 @@ export class Blockchain {
         return blk
     }
 
-    public addBlock(miner: string) {
-        let phash = this.getLastBlock() ? this.getLastBlock().hash : ""
+    public async addBlock(miner: string) {
+        let phash = this.getLastBlock().hash
         let block = new Block(
             phash,
             this.mempool.slice(),
@@ -82,46 +86,52 @@ export class Blockchain {
 
         block = this.pow(block)
 
-        this.db.models.Block.create({
-            index: block.index,
-            nonce: block.nonce,
-            mekleRoot: block.mekleRoot,
-            prevHash: block.prevHash,
-            timestamp: block.timestamp,
-        }).then(blk => {
-            this.mempool = this.mempool.filter((tx) => {
-                for (let i of block.data) {
-                    if (i.hash === tx.hash) {
-                        this.db.models.Transaction.create({
-                            sign: tx.sign,
-                            from: tx.from,
-                            to: tx.to,
-                            amount: tx.amount,
-                            data: tx.data,
-                            timestamp: tx.timestamp,
-                            BlockId: blk.dataValues.id
-                        })
-                        return false
-                    }
-                }
-                return false
-            })
-        })
-
         for (let tx of block.data) {
             this.users[tx.from].lockedOut -= tx.amount
             this.users[tx.to].lockedIn -= tx.amount
             this.users[tx.to].balance += tx.amount
         }
 
+        this.chain = block
+
+        let blk = await this.db.models.Block.create({
+            index: block.index,
+            nonce: block.nonce,
+            merkleRoot: block.merkleRoot,
+            prevHash: block.prevHash,
+            timestamp: block.timestamp,
+            hash: block.hash
+        })
+
+        this.mempool = this.mempool.filter((tx) => {
+            for (let i of block.data) {
+                if (i.hash === tx.hash) {
+                    this.db.models.Transaction.create({
+                        sign: tx.sign,
+                        from: tx.from,
+                        to: tx.to,
+                        amount: tx.amount,
+                        data: tx.data,
+                        timestamp: tx.timestamp,
+                        BlockId: blk.dataValues.id,
+                        hash: tx.hash,
+                        seed: tx.seed
+                    }).then((d) => { }).catch((e) => { console.log("tx add err", e) })
+                    return false
+                }
+            }
+            return true
+        })
+        this.addReward(miner)
+    }
+
+    private addReward(miner: string) {
         this.addTx(new Transaction(
             STORGE,
             miner,
             minerReward,
             "REWARD"
         ), "")
-
-        this.chain.push(block)
     }
 
     public verifySign(data: any, sign: string, pub: string) {
@@ -167,22 +177,67 @@ export class Blockchain {
         return this.users[addr]
     }
 
-    public toString(str: string = "") {
-        let chain = []
+    private async restoreBlock(b: Model<BlockModel>) {
+        let blk: Block | null = null
+        blk = new Block(
+            b.dataValues.prevHash,
+            [],
+            b.dataValues.index,
+            b.dataValues.timestamp
+        )
+        let txsd = await this.db.models.Transaction.findAll({
+            where: {
+                BlockId: b.dataValues.id
+            }
+        })
 
-        for (let blk of this.chain) {
-            chain.push(blk.toObj())
+        if (txsd == null) {
+            blk = null
+        } else {
+            let txs: Transaction[] = []
+            for (let tx of txsd) {
+                txs.push(new Transaction(
+                    tx.dataValues.from,
+                    tx.dataValues.to,
+                    tx.dataValues.amount,
+                    tx.dataValues.data,
+                    tx.dataValues.timestamp
+                ))
+                txs[txs.length - 1].sign = tx.dataValues.sign
+                txs[txs.length - 1].seed = tx.dataValues.seed
+            }
+            if (blk != null) blk.data = txs
         }
 
-        return JSON.stringify(chain, undefined, str)
+        return blk
     }
-    public toObj() {
+
+    public async toString(str: string = "") {
+        try {
+            let chain = await this.toObj()
+
+            if (chain instanceof Error) throw chain
+
+            return JSON.stringify(chain, undefined, str)
+        } catch (error) {
+            return error
+        }
+    }
+    public async toObj() {
         let chain = []
 
-        for (let blk of this.chain) {
-            chain.push(blk.toObj())
-        }
+        try {
+            let _chain = await this.db.models.Block.findAll()
 
-        return chain
+            if (_chain == null) throw Error("No such blocks")
+
+            for (let blk of _chain) {
+                chain.push(await this.restoreBlock(blk))
+            }
+
+            return chain
+        } catch (error) {
+            return error
+        }
     }
 }

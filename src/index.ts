@@ -14,18 +14,18 @@ let chain = new Blockchain()
 let ailce = new User(chain)
 let bob = new User(chain)
 
-chain.addBlock(bob.addr)
+// chain.addBlock(bob.addr)
 
 // console.log(`bob: ${bob.balance}, alice: ${ailce.balance}`)
-chain.addBlock(bob.addr)
+// chain.addBlock(bob.addr)
 
 // console.log(`bob: ${bob.balance}, alice: ${ailce.balance}`)
-bob.sendMoney(ailce.addr, 20)
+// bob.sendMoney(ailce.addr, 20)
 
-chain.addBlock(bob.addr)
+// chain.addBlock(bob.addr)
 
-function miner() {
-    chain.addBlock(bob.addr)
+async function miner() {
+    await chain.addBlock(bob.addr)
     setTimeout(miner, 5000)
 }
 
@@ -52,10 +52,10 @@ app.use((req, res, next) => {
     next()
 })
 
-app.get("/blockchain/", (req, res) => {
+app.get("/blockchain/", async (req, res) => {
     res.send({
         status: 0,
-        data: chain.toObj()
+        data: await chain.toObj()
     })
 })
 
@@ -128,7 +128,9 @@ app.post("/balance/", (req, res) => {
 })
 
 
-app.listen(port, () => {
+async function start() {
+    await chain.init(miner)
+    await app.listen(port)
     console.log("listening on ")
-    miner()
-})
+}
+start()
