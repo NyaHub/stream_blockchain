@@ -1,23 +1,66 @@
 import MerkleTree from "merkletreejs"
 import { SHA256 } from "../utils"
-import { Transaction } from "./transaction"
+import { ITransaction, Transaction } from "./transaction"
 
 export interface Blk {
     data: Transaction[],
     timestamp: number
 }
 
+export interface IBlock {
+    index: number
+    nonce: number
+    // merkleRoot: string
+    // hash: string
+    prevHash: string
+    timestamp: number,
+    data?: ITransaction[]
+}
+
 export class Block {
-    public nonce: number = 0 // Math.floor(Math.random() * 999999)
-    public merkleRoot: string
+    public nonce: number = Math.floor(Math.random() * 999999)
+    private _merkleRoot: string
 
     constructor(
-        public prevHash: string,
-        public data: Transaction[],
-        public index: number,
-        public timestamp: number = new Date().getTime()
+        private _prevHash: string,
+        private _data: Transaction[],
+        private _index: number,
+        private _timestamp: number = new Date().getTime()
     ) {
-        this.merkleRoot = this.getMerkleRoot()
+        this._merkleRoot = this.getMerkleRoot()
+    }
+
+    static create(blk: IBlock) {
+        let txs: Transaction[] = []
+
+        if (!blk.data) throw Error("Block not contains txs")
+
+        for (let tx of blk.data) {
+            txs.push(Transaction.create(tx))
+        }
+
+        return new Block(
+            blk.prevHash,
+            txs,
+            blk.index,
+            blk.timestamp
+        )
+    }
+
+    get prevHash() {
+        return this._prevHash
+    }
+    get data() {
+        return this._data
+    }
+    get index() {
+        return this._index
+    }
+    get timestamp() {
+        return this._timestamp
+    }
+    get merkleRoot() {
+        return this._merkleRoot
     }
 
     getMerkleRoot() {

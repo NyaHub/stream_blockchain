@@ -1,19 +1,19 @@
-import { createVerify } from "crypto"
-import { Blk, Block } from "./block"
-import { Transaction } from "./transaction"
+import { Block, IBlock } from "./block"
+import { ITransaction, Transaction } from "./transaction"
 import { IUser } from "./user"
 import { ec as EC } from "elliptic"
 import { SHA256 } from "../utils"
 import { Model, Sequelize } from "sequelize"
 import { BlockModel, initDB } from "./db"
-import { error } from "console"
 
 let ec = new EC('secp256k1')
 
 const STORGE = "storage"
 const STORGE_BALANCE = 1000000000
-const me = "it's me"
-const minerReward = 100
+const ME = "it's me"
+const MINER_REWARD = 100
+const TXS_LIMIT = 5
+const DEFAULT_FEE = .0005
 
 const STORGE_WALLET = {
     addr: STORGE,
@@ -27,6 +27,7 @@ export class Blockchain {
     public users: { [index: string]: IUser } = { [STORGE]: STORGE_WALLET }
     private mempool: Transaction[] = []
     private db: Sequelize
+    private _fee: number[] = [DEFAULT_FEE]
 
     constructor(public diff: number = 2) {
         this.db = initDB('sqlite:chain.sqlite')
@@ -41,7 +42,7 @@ export class Blockchain {
                     let blk = await this.restoreBlock(d)
 
                     if (blk != null) { this.chain = blk }
-                    { this.createGenesis() }
+                    else { this.createGenesis() }
                 } else {
                     this.createGenesis()
                 }
@@ -51,11 +52,25 @@ export class Blockchain {
     }
 
     private createGenesis() {
-        this.addTx(new Transaction(STORGE, me, 100, "this is genesis block"), "")
+        this.addTx(new Transaction(STORGE, ME, 100, 100, "this is genesis block"), "")
     }
 
     public getLastBlock() {
         return this.chain
+    }
+
+    getFee() {
+        let avg = 0
+        this._fee.forEach(e => {
+            avg += e
+        })
+        avg /= this._fee.length
+
+        return [
+            this._fee[0],
+            avg,
+            this._fee[this._fee.length - 1]
+        ]
     }
 
     public pow(blk: Block) {
@@ -76,11 +91,35 @@ export class Blockchain {
         return blk
     }
 
+    get mem_length() {
+        let storage = false
+        this.mempool.forEach((v) => {
+            storage = storage || v.from == STORGE
+        })
+
+        let max_txs = TXS_LIMIT + (storage ? 1 : 0)
+        return this.mempool.length > max_txs ? max_txs : this.mempool.length
+    }
+
+    private getTxs() {
+        this.mempool.sort((a, b) => {
+            if (a.fee > b.fee) {
+                return -1;
+            }
+            if (b.fee > a.fee) {
+                return 1;
+            }
+            return 0;
+        })
+
+        return this.mempool.slice(0, this.mem_length)
+    }
+
     public async addBlock(miner: string) {
         let phash = this.getLastBlock().hash
         let block = new Block(
             phash,
-            this.mempool.slice(),
+            this.getTxs(),
             this.getLastBlock().index + 1
         )
 
@@ -90,6 +129,7 @@ export class Blockchain {
             this.users[tx.from].lockedOut -= tx.amount
             this.users[tx.to].lockedIn -= tx.amount
             this.users[tx.to].balance += tx.amount
+            this.users[STORGE].balance += tx.fee
         }
 
         this.chain = block
@@ -99,7 +139,7 @@ export class Blockchain {
             nonce: block.nonce,
             merkleRoot: block.merkleRoot,
             prevHash: block.prevHash,
-            timestamp: block.timestamp,
+            tiMEstamp: block.timestamp,
             hash: block.hash
         })
 
@@ -112,7 +152,8 @@ export class Blockchain {
                         to: tx.to,
                         amount: tx.amount,
                         data: tx.data,
-                        timestamp: tx.timestamp,
+                        fee: tx.fee,
+                        tiMEstamp: tx.timestamp,
                         BlockId: blk.dataValues.id,
                         hash: tx.hash,
                         seed: tx.seed
@@ -123,13 +164,16 @@ export class Blockchain {
             return true
         })
         this.addReward(miner)
+        console.log(this._fee)
     }
 
     private addReward(miner: string) {
+        if (this.users[STORGE].balance < MINER_REWARD) return
         this.addTx(new Transaction(
             STORGE,
             miner,
-            minerReward,
+            MINER_REWARD,
+            100,
             "REWARD"
         ), "")
     }
@@ -157,7 +201,7 @@ export class Blockchain {
                 lockedOut: 0
             }
         }
-        if (tx.from != STORGE && this.users[tx.from].balance < tx.amount) {
+        if (tx.from != STORGE && this.users[tx.from].balance < tx.amount + tx.fee) {
             throw Error("tx.amount  > from.balance")
         }
 
@@ -166,8 +210,14 @@ export class Blockchain {
         }
 
         this.users[tx.from].balance -= tx.amount
-        this.users[tx.from].lockedOut += tx.amount
+        this.users[tx.from].lockedOut += tx.amount + tx.fee
         this.users[tx.to].lockedIn += tx.amount
+
+        if (tx.from != STORGE) {
+            this._fee.push(tx.fee)
+            this._fee.sort((a, b) => b - a)
+            this._fee = this._fee.slice(0, this.mem_length)
+        }
 
         this.mempool.push(tx)
     }
@@ -178,38 +228,26 @@ export class Blockchain {
     }
 
     private async restoreBlock(b: Model<BlockModel>) {
-        let blk: Block | null = null
-        blk = new Block(
-            b.dataValues.prevHash,
-            [],
-            b.dataValues.index,
-            b.dataValues.timestamp
-        )
+        if (b == null) return null
+
         let txsd = await this.db.models.Transaction.findAll({
             where: {
                 BlockId: b.dataValues.id
             }
         })
 
-        if (txsd == null) {
-            blk = null
-        } else {
-            let txs: Transaction[] = []
-            for (let tx of txsd) {
-                txs.push(new Transaction(
-                    tx.dataValues.from,
-                    tx.dataValues.to,
-                    tx.dataValues.amount,
-                    tx.dataValues.data,
-                    tx.dataValues.timestamp
-                ))
-                txs[txs.length - 1].sign = tx.dataValues.sign
-                txs[txs.length - 1].seed = tx.dataValues.seed
-            }
-            if (blk != null) blk.data = txs
-        }
+        if (txsd == null)
+            return null
 
-        return blk
+        let txs: ITransaction[] = txsd.map((v) => {
+            return <ITransaction>v.dataValues
+        })
+
+        let blk: IBlock = b.dataValues
+
+        blk.data = txs
+
+        return Block.create(blk)
     }
 
     public async toString(str: string = "") {
@@ -229,7 +267,7 @@ export class Blockchain {
         try {
             let _chain = await this.db.models.Block.findAll()
 
-            if (_chain == null) throw Error("No such blocks")
+            if (_chain.length == 0) throw Error("No such blocks")
 
             for (let blk of _chain) {
                 chain.push(await this.restoreBlock(blk))

@@ -1,5 +1,4 @@
 import { DataTypes, Model, Sequelize } from "sequelize";
-import sequelize from "sequelize/types/sequelize";
 
 export interface BlockModel extends Model {
     id: number
@@ -17,6 +16,7 @@ export interface TransactionModel extends Model {
     from: string
     to: string
     amount: number
+    fee: number
     data: string
     timestamp: number
     hash: string
@@ -56,6 +56,7 @@ export function initDB(seqOpts: any) {
         from: DataTypes.STRING,
         to: DataTypes.STRING,
         amount: DataTypes.FLOAT,
+        fee: DataTypes.FLOAT,
         data: DataTypes.STRING,
         timestamp: DataTypes.INTEGER.UNSIGNED,
         hash: {

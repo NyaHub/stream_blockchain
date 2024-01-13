@@ -1,4 +1,3 @@
-import { createSign, generateKeyPairSync } from "crypto"
 import { Blockchain } from "./bockchain"
 import { Transaction } from "./transaction"
 import { ec as EC } from "elliptic"
@@ -58,7 +57,8 @@ export class User {
         if (amount > this.balance.balance) {
             throw Error("amount > balnce")
         }
-        let tx = new Transaction(this.addr, to, amount)
+        let fees = this.chain.getFee()
+        let tx = new Transaction(this.addr, to, fees[1], amount)
         tx.sign = this.sign(tx)
 
         let r = this.chain.addTx(tx, this.keypair.getPublic("hex"))

@@ -90,7 +90,7 @@ app.post("/send/", (req, res) => {
 
     try {
         let intx = data.data.tx
-        let tx = new Transaction(intx.from, intx.to, intx.amount)
+        let tx = new Transaction(intx.from, intx.to, .1, intx.amount)
         tx.sign = intx.sign
         chain.addTx(tx, data.data.pk)
         res.send({
