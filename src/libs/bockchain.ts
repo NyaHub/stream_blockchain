@@ -4,7 +4,7 @@ import { IUser } from "./user"
 import { ec as EC } from "elliptic"
 import { SHA256 } from "../utils"
 import { Model, Sequelize } from "sequelize"
-import { BlockModel, initDB } from "./db"
+import { BlockModel, TransactionModel, initDB } from "./db"
 
 let ec = new EC('secp256k1')
 
@@ -23,7 +23,7 @@ const STORGE_WALLET = {
 }
 
 export class Blockchain {
-    public chain: Block = new Block("", [], 0)
+    public chain: Block = new Block("", [], 0, 0)
     public users: { [index: string]: IUser } = { [STORGE]: STORGE_WALLET }
     private mempool: Transaction[] = []
     private db: Sequelize
@@ -34,20 +34,36 @@ export class Blockchain {
     }
 
     async init(cb: () => void) {
-        this.db.sync({ force: true }).then(() => {
-            this.db.models.Block.findOne({
-                order: [['createdAt', 'DESC']]
-            }).then(async (d) => {
-                if (d != null) {
-                    let blk = await this.restoreBlock(d)
+        this.db.sync({ force: !true }).then(() => {
+            this.db.models.Block.findAll()
+                .then(async (d) => {
+                    if (d.length != 0) {
+                        for (let b of d) {
+                            let blk = await this.restoreBlock(b)
 
-                    if (blk != null) { this.chain = blk }
-                    else { this.createGenesis() }
-                } else {
-                    this.createGenesis()
-                }
-                cb()
-            }).catch(console.log)
+                            if (blk != null) {
+                                if (blk.prevHash != this.chain.hash) {
+                                    for (let tx of blk.data) {
+                                        this.users[tx.from].balance += (tx.amount + tx.fee)
+                                        this.users[tx.to].balance -= tx.amount
+                                        this.users[STORGE].balance -= tx.fee
+                                        this.db.models.Transaction.destroy({
+                                            where: {
+                                                hash: tx.hash
+                                            }
+                                        })
+                                    }
+                                    await b.destroy()
+                                }
+                                this.chain = blk
+                            }
+                            else { this.createGenesis(); return cb() }
+                        }
+                    } else {
+                        this.createGenesis()
+                    }
+                    cb()
+                }).catch(console.log)
         }).catch(console.log)
     }
 
@@ -60,6 +76,18 @@ export class Blockchain {
     }
 
     getFee() {
+        this._fee = []
+        this.mempool.forEach((v) => {
+            if (v.from != STORGE) {
+                this._fee.push(v.fee)
+            }
+        })
+
+        if (this._fee.length == 0) return [DEFAULT_FEE, DEFAULT_FEE, DEFAULT_FEE]
+
+        this._fee.sort((a, b) => b - a)
+        this._fee = this._fee.slice(0, TXS_LIMIT)
+
         let avg = 0
         this._fee.forEach(e => {
             avg += e
@@ -91,18 +119,10 @@ export class Blockchain {
         return blk
     }
 
-    get mem_length() {
-        let storage = false
-        this.mempool.forEach((v) => {
-            storage = storage || v.from == STORGE
-        })
-
-        let max_txs = TXS_LIMIT + (storage ? 1 : 0)
-        return this.mempool.length > max_txs ? max_txs : this.mempool.length
-    }
-
     private getTxs() {
+        let storage = false
         this.mempool.sort((a, b) => {
+            storage = storage || a.from == STORGE || b.from == STORGE
             if (a.fee > b.fee) {
                 return -1;
             }
@@ -112,7 +132,9 @@ export class Blockchain {
             return 0;
         })
 
-        return this.mempool.slice(0, this.mem_length)
+        let max_txs = TXS_LIMIT + (storage ? 1 : 0)
+        max_txs = this.mempool.length > max_txs ? max_txs : this.mempool.length
+        return this.mempool.slice(0, max_txs)
     }
 
     public async addBlock(miner: string) {
@@ -139,7 +161,7 @@ export class Blockchain {
             nonce: block.nonce,
             merkleRoot: block.merkleRoot,
             prevHash: block.prevHash,
-            tiMEstamp: block.timestamp,
+            timestamp: block.timestamp,
             hash: block.hash
         })
 
@@ -153,7 +175,7 @@ export class Blockchain {
                         amount: tx.amount,
                         data: tx.data,
                         fee: tx.fee,
-                        tiMEstamp: tx.timestamp,
+                        timestamp: tx.timestamp,
                         BlockId: blk.dataValues.id,
                         hash: tx.hash,
                         seed: tx.seed
@@ -164,7 +186,6 @@ export class Blockchain {
             return true
         })
         this.addReward(miner)
-        console.log(this._fee)
     }
 
     private addReward(miner: string) {
@@ -185,39 +206,7 @@ export class Blockchain {
     }
 
     public addTx(tx: Transaction, key: string) {
-        if (!this.users[tx.from]) {
-            this.users[tx.from] = {
-                addr: tx.from,
-                balance: 0,
-                lockedIn: 0,
-                lockedOut: 0
-            }
-        }
-        if (!this.users[tx.to]) {
-            this.users[tx.to] = {
-                addr: tx.to,
-                balance: 0,
-                lockedIn: 0,
-                lockedOut: 0
-            }
-        }
-        if (tx.from != STORGE && this.users[tx.from].balance < tx.amount + tx.fee) {
-            throw Error("tx.amount  > from.balance")
-        }
-
-        if (tx.from != STORGE && this.verifySign(tx, tx.sign, key)) {
-            throw Error("sing not vaild")
-        }
-
-        this.users[tx.from].balance -= tx.amount
-        this.users[tx.from].lockedOut += tx.amount + tx.fee
-        this.users[tx.to].lockedIn += tx.amount
-
-        if (tx.from != STORGE) {
-            this._fee.push(tx.fee)
-            this._fee.sort((a, b) => b - a)
-            this._fee = this._fee.slice(0, this.mem_length)
-        }
+        this.restoreBalance(tx, key)
 
         this.mempool.push(tx)
     }
@@ -240,6 +229,7 @@ export class Blockchain {
             return null
 
         let txs: ITransaction[] = txsd.map((v) => {
+            this.restoreBalance(v)
             return <ITransaction>v.dataValues
         })
 
@@ -248,6 +238,52 @@ export class Blockchain {
         blk.data = txs
 
         return Block.create(blk)
+    }
+
+    private restoreBalance(txi: Model<TransactionModel> | ITransaction | Transaction, key?: string) {
+        let tx: ITransaction
+
+        if (txi instanceof Model) {
+            tx = <ITransaction>txi.dataValues
+        } else {
+            tx = txi
+        }
+
+        if (!this.users[tx.from]) {
+            this.users[tx.from] = {
+                addr: tx.from,
+                balance: 0,
+                lockedIn: 0,
+                lockedOut: 0
+            }
+        }
+        if (!this.users[tx.to]) {
+            this.users[tx.to] = {
+                addr: tx.to,
+                balance: 0,
+                lockedIn: 0,
+                lockedOut: 0
+            }
+        }
+
+        if (key != null) {
+            if (tx.from != STORGE && this.users[tx.from].balance < tx.amount + tx.fee) {
+                throw Error("tx.amount  > from.balance")
+            }
+
+            if (tx.from != STORGE && this.verifySign(tx, tx.sign, key)) {
+                throw Error("sing not vaild")
+            }
+            this.users[tx.from].balance -= tx.amount + tx.fee
+            this.users[tx.from].lockedOut += tx.amount + tx.fee
+            this.users[tx.to].lockedIn += tx.amount
+        } else {
+            this.users[tx.from].balance -= (tx.amount + tx.fee)
+            this.users[tx.to].balance += tx.amount
+            this.users[STORGE].balance += tx.fee
+        }
+
+
     }
 
     public async toString(str: string = "") {

@@ -31,6 +31,7 @@ export class Transaction {
             tx.amount,
             tx.fee,
             tx.data,
+            tx.timestamp,
             tx.seed
         )
         tmp.sign = tx.sign

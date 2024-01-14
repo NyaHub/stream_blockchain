@@ -58,7 +58,7 @@ export class User {
             throw Error("amount > balnce")
         }
         let fees = this.chain.getFee()
-        let tx = new Transaction(this.addr, to, fees[1], amount)
+        let tx = new Transaction(this.addr, to, amount, fees[1])
         tx.sign = this.sign(tx)
 
         let r = this.chain.addTx(tx, this.keypair.getPublic("hex"))

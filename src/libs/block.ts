@@ -39,12 +39,15 @@ export class Block {
             txs.push(Transaction.create(tx))
         }
 
-        return new Block(
+        let ret = new Block(
             blk.prevHash,
             txs,
             blk.index,
             blk.timestamp
         )
+
+        ret.nonce = blk.nonce
+        return ret
     }
 
     get prevHash() {

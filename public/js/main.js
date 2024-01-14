@@ -64,11 +64,11 @@ class User {
         return sign.toDER("hex")
     }
 
-    async sendMoney(to, amount) {
+    async sendMoney(to, amount, fee) {
         if (amount > this.balance) {
             throw Error("amount > balnce")
         }
-        let tx = new Transaction(this.addr, to, amount)
+        let tx = new Transaction(this.addr, to, amount, fee)
         tx.sign = await this.sign(tx)
 
         let r = await addTx(tx, this.keypair.getPublic("hex"))
@@ -95,7 +95,7 @@ PetiteVue.createApp({
         setTimeout(this.getUsers, 5000)
     },
     sendTx(e) {
-        store.user.sendMoney(e.target[0].value, parseFloat(e.target[1].value))
+        store.user.sendMoney(e.target[0].value, parseFloat(e.target[1].value), parseFloat(e.target[2].value))
     },
     getMoney() {
         req({

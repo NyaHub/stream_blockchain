@@ -31,7 +31,8 @@
             <h2>Send Tx</h2>
             <form action="/send/" @submit.prevent="sendTx" method="post">
                 <div><label for="to">To</label><input type="text" name="to" id="to"></div>
-                <div><label for="amount">Amount</label><input type="number" name="amount" id="amount"></div>
+                <div><label for="amount">Amount</label><input type="text" name="amount" id="amount"></div>
+                <div><label for="fee">Fee</label><input type="nutextmber" name="fee" id="fee"></div>
                 <div><button type="submit">Send</button></div>
             </form>
         </div>
