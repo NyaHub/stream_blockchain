@@ -10,8 +10,8 @@ export interface Blk {
 export interface IBlock {
     index: number
     nonce: number
-    // merkleRoot: string
-    // hash: string
+    merkleRoot?: string
+    hash?: string
     prevHash: string
     timestamp: number,
     data?: ITransaction[]

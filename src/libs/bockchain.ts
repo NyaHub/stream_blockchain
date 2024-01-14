@@ -5,6 +5,7 @@ import { ec as EC } from "elliptic"
 import { SHA256 } from "../utils"
 import { Model, Sequelize } from "sequelize"
 import { BlockModel, TransactionModel, initDB } from "./db"
+import { Event } from "./event"
 
 let ec = new EC('secp256k1')
 
@@ -29,7 +30,7 @@ export class Blockchain {
     private db: Sequelize
     private _fee: number[] = [DEFAULT_FEE]
 
-    constructor(public diff: number = 2) {
+    constructor(public event: Event, public diff: number = 2) {
         this.db = initDB('sqlite:chain.sqlite')
     }
 
@@ -101,24 +102,6 @@ export class Blockchain {
         ]
     }
 
-    public pow(blk: Block) {
-        console.log("Mining...")
-
-        const d = new Array(this.diff + 1).join("0")
-
-        while (true) {
-            let hash = blk.hash
-            if (hash.slice(0, this.diff) == d) {
-                console.log(hash)
-                console.log("Solve: ", blk.nonce)
-                break
-            }
-            blk.nonce++
-        }
-
-        return blk
-    }
-
     private getTxs() {
         let storage = false
         this.mempool.sort((a, b) => {
@@ -137,18 +120,80 @@ export class Blockchain {
         return this.mempool.slice(0, max_txs)
     }
 
-    public async addBlock(miner: string) {
+    public createBlock() {
         let phash = this.getLastBlock().hash
-        let block = new Block(
+        return new Block(
             phash,
             this.getTxs(),
             this.getLastBlock().index + 1
         )
+    }
 
-        block = this.pow(block)
+    public async requestChain(index: number) {
+        return [new Block("", [], index + 1, 0)]
+    }
+
+    public async addNetBlock(block: IBlock) {
+        // let dbBlock = await this.db.models.Block.findOne({
+        //     where: {
+        //         hash: block.hash
+        //     }
+        // })
+
+        // if(dbBlock != null) return
+        // if(this.chain.hash != block.prevHash) {
+        //     let chain = await this.requestChain(this.chain.index)
+
+        //     for(let blk of chain){
+
+        //     }
+        // }
+
+        // if(!block.data) throw Error("Block not contains txs")
+
+        // for (let tx of block.data) {
+        //     this.users[tx.from].lockedOut -= (tx.amount + tx.fee)
+        //     this.users[tx.to].lockedIn -= tx.amount
+        //     this.users[tx.to].balance += tx.amount
+        //     this.users[STORGE].balance += tx.fee
+        // }
+
+        // let blk = await this.db.models.Block.create({
+        //     index: block.index,
+        //     nonce: block.nonce,
+        //     merkleRoot: block.merkleRoot,
+        //     prevHash: block.prevHash,
+        //     timestamp: block.timestamp,
+        //     hash: block.hash
+        // })
+
+        // this.mempool = this.mempool.filter((tx) => {
+        //     for (let i of block.data) {
+        //         if (i.hash === tx.hash) {
+        //             this.db.models.Transaction.create({
+        //                 sign: tx.sign,
+        //                 from: tx.from,
+        //                 to: tx.to,
+        //                 amount: tx.amount,
+        //                 data: tx.data,
+        //                 fee: tx.fee,
+        //                 timestamp: tx.timestamp,
+        //                 BlockId: blk.dataValues.id,
+        //                 hash: tx.hash,
+        //                 seed: tx.seed
+        //             }).then((d) => { }).catch((e) => { console.log("tx add err", e) })
+        //             return false
+        //         }
+        //     }
+        //     return true
+        // })
+
+    }
+
+    public async addBlock(block: Block, miner: string) {
 
         for (let tx of block.data) {
-            this.users[tx.from].lockedOut -= tx.amount
+            this.users[tx.from].lockedOut -= (tx.amount + tx.fee)
             this.users[tx.to].lockedIn -= tx.amount
             this.users[tx.to].balance += tx.amount
             this.users[STORGE].balance += tx.fee
@@ -197,6 +242,18 @@ export class Blockchain {
             100,
             "REWARD"
         ), "")
+    }
+
+    public async verifyBlock(block: IBlock) {
+        let prevBlock = await this.db.models.Block.findOne({
+            where: {
+                prevHash: block.prevHash
+            }
+        })
+
+        if (prevBlock == null) return false
+
+        return true
     }
 
     public verifySign(data: any, sign: string, pub: string) {

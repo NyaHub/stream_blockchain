@@ -5,35 +5,21 @@ import experss from "express"
 import bodyParser from "body-parser";
 import path from "node:path";
 import { Transaction } from "./libs/transaction";
+import { Event } from "./libs/event";
+import { Miner } from "./libs/miner";
+import { IBlock } from "./libs/block";
 
 let args = minimist(process.argv.slice(2))
 
 
-let chain = new Blockchain()
+let event = new Event()
+
+let chain = new Blockchain(event)
 
 let ailce = new User(chain)
 let bob = new User(chain)
 
-// chain.addBlock(bob.addr)
-
-// console.log(`bob: ${bob.balance}, alice: ${ailce.balance}`)
-// chain.addBlock(bob.addr)
-
-// console.log(`bob: ${bob.balance}, alice: ${ailce.balance}`)
-// bob.sendMoney(ailce.addr, 20)
-
-// chain.addBlock(bob.addr)
-
-async function miner() {
-    await chain.addBlock(bob.addr)
-    setTimeout(miner, 5000)
-}
-
-// for (let blk of chain.chain) {
-//     console.log(blk.toString("\t"))
-// }
-
-console.log(`bob: ${bob.balance.balance}, alice: ${ailce.balance.balance}`)
+let miner = new Miner(event, chain, bob)
 
 interface IData {
     status: number, // 0 - ok, 1 - any error
@@ -127,9 +113,38 @@ app.post("/balance/", (req, res) => {
     })
 })
 
+/*
+
+{
+    status: ??
+    data: {
+        block: IBlock
+    }
+}
+
+*/
+app.post("/anonce_block/", async (req, res) => {
+    let block: IBlock = req.body.data.block
+    let r = await chain.verifyBlock(block)
+
+    if (!r) return res.send({
+        status: 1,
+        data: "",
+        error: "Block not valid!"
+    })
+
+
+})
+
+
+
+app.post("/anonce_tx/", (req, res) => {
+
+})
+
 
 async function start() {
-    await chain.init(miner)
+    await chain.init(miner.pow.bind(miner))
     await app.listen(port)
     console.log("listening on ")
 }

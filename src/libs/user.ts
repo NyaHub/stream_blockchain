@@ -10,11 +10,6 @@ export interface IUser {
     lockedOut: number
 }
 
-interface IKeyPair {
-    public: string,
-    private: string
-}
-
 export class User {
     public keypair: EC.KeyPair
     public addr: string
