@@ -8,16 +8,15 @@ export class Miner {
     private mine: boolean = true
 
     constructor(private event: Event, private chain: Blockchain, private user: User) {
-        event.on("moned", this.onMined.bind(this))
+        event.on("toggleMiner", this.toggle.bind(this))
     }
 
-    private onMined() {
-        this.mine = false
+    private toggle() {
+        this.mine = !this.mine
     }
 
     public pow() {
         let blk = this.chain.createBlock()
-        this.mine = true
 
         console.log("Mining...")
 
@@ -33,8 +32,10 @@ export class Miner {
             blk.nonce++
         }
 
-        this.chain.addBlock(blk, this.user.addr)
+        this.chain.addMinedBock(blk, this.user.addr)
 
-        setTimeout(this.pow, TIMEOUT)
+        this.event.emit("anonceBlock", blk.hash)
+
+        setTimeout(this.pow.bind(this), TIMEOUT)
     }
 }

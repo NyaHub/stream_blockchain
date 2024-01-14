@@ -32,6 +32,8 @@ export class Blockchain {
 
     constructor(public event: Event, public diff: number = 2) {
         this.db = initDB('sqlite:chain.sqlite')
+        event.on("answerChain", this.addNetBlock.bind(this))
+        event.on("answerTx", this.addTx.bind(this))
     }
 
     async init(cb: () => void) {
@@ -129,72 +131,49 @@ export class Blockchain {
         )
     }
 
-    public async requestChain(index: number) {
-        return [new Block("", [], index + 1, 0)]
+    public async checkNetBlock(hash: string) {
+        let dbBlock = await this.db.models.Block.findOne({
+            where: {
+                hash
+            }
+        })
+
+        if (dbBlock != null) return false
+
+        return true
     }
 
-    public async addNetBlock(block: IBlock) {
-        // let dbBlock = await this.db.models.Block.findOne({
-        //     where: {
-        //         hash: block.hash
-        //     }
-        // })
+    public async addNetBlock(chain: IBlock[]) {
+        let blkHashes: string[] = []
+        let blocks: Block[] = []
 
-        // if(dbBlock != null) return
-        // if(this.chain.hash != block.prevHash) {
-        //     let chain = await this.requestChain(this.chain.index)
+        if (chain[0].hash != this.chain.hash) return
 
-        //     for(let blk of chain){
+        chain.shift()
 
-        //     }
-        // }
+        this.event.emit("toggleMiner", null)
 
-        // if(!block.data) throw Error("Block not contains txs")
+        for (let blk of chain) {
+            let b = Block.create(blk)
 
-        // for (let tx of block.data) {
-        //     this.users[tx.from].lockedOut -= (tx.amount + tx.fee)
-        //     this.users[tx.to].lockedIn -= tx.amount
-        //     this.users[tx.to].balance += tx.amount
-        //     this.users[STORGE].balance += tx.fee
-        // }
+            if (b.hash === blk.hash && b.prevHash === this.chain.hash) {
+                this.chain = b
+                await this.addBlock(b)
+            }
+        }
 
-        // let blk = await this.db.models.Block.create({
-        //     index: block.index,
-        //     nonce: block.nonce,
-        //     merkleRoot: block.merkleRoot,
-        //     prevHash: block.prevHash,
-        //     timestamp: block.timestamp,
-        //     hash: block.hash
-        // })
-
-        // this.mempool = this.mempool.filter((tx) => {
-        //     for (let i of block.data) {
-        //         if (i.hash === tx.hash) {
-        //             this.db.models.Transaction.create({
-        //                 sign: tx.sign,
-        //                 from: tx.from,
-        //                 to: tx.to,
-        //                 amount: tx.amount,
-        //                 data: tx.data,
-        //                 fee: tx.fee,
-        //                 timestamp: tx.timestamp,
-        //                 BlockId: blk.dataValues.id,
-        //                 hash: tx.hash,
-        //                 seed: tx.seed
-        //             }).then((d) => { }).catch((e) => { console.log("tx add err", e) })
-        //             return false
-        //         }
-        //     }
-        //     return true
-        // })
-
+        this.event.emit("toggleMiner", null)
     }
 
-    public async addBlock(block: Block, miner: string) {
+    public async addBlock(block: Block) {
 
         for (let tx of block.data) {
-            this.users[tx.from].lockedOut -= (tx.amount + tx.fee)
-            this.users[tx.to].lockedIn -= tx.amount
+            if (this.mempool.find(t => tx.hash == t.hash)) {
+                this.users[tx.from].lockedOut -= (tx.amount + tx.fee)
+                this.users[tx.to].lockedIn -= tx.amount
+            } else {
+                this.users[tx.from].balance -= (tx.amount + tx.fee)
+            }
             this.users[tx.to].balance += tx.amount
             this.users[STORGE].balance += tx.fee
         }
@@ -230,6 +209,10 @@ export class Blockchain {
             }
             return true
         })
+    }
+
+    public async addMinedBock(block: Block, miner: string) {
+        this.addBlock(block)
         this.addReward(miner)
     }
 
@@ -244,18 +227,6 @@ export class Blockchain {
         ), "")
     }
 
-    public async verifyBlock(block: IBlock) {
-        let prevBlock = await this.db.models.Block.findOne({
-            where: {
-                prevHash: block.prevHash
-            }
-        })
-
-        if (prevBlock == null) return false
-
-        return true
-    }
-
     public verifySign(data: any, sign: string, pub: string) {
         let key = ec.keyFromPublic(pub, 'hex')
         let hash = SHA256(JSON.stringify(data))
@@ -266,6 +237,7 @@ export class Blockchain {
         this.restoreBalance(tx, key)
 
         this.mempool.push(tx)
+        this.event.emit("anonceTx", tx.hash)
     }
 
     public getBalance(addr: string): IUser {
@@ -295,6 +267,17 @@ export class Blockchain {
         blk.data = txs
 
         return Block.create(blk)
+    }
+
+    public async checkNetTx(hash: string) {
+        if (this.mempool.find(tx => tx.hash === hash)) return false
+        let tx = await this.db.models.Transaction.findOne({
+            where: { hash }
+        })
+
+        if (tx != null) return false
+
+        return true
     }
 
     private restoreBalance(txi: Model<TransactionModel> | ITransaction | Transaction, key?: string) {
@@ -370,5 +353,45 @@ export class Blockchain {
         } catch (error) {
             return error
         }
+    }
+
+    public async getChain(hash: string) {
+        let chain: IBlock[] = []
+
+        let _chain = await this.db.models.Block.findAll({ include: this.db.models.Transaction })
+
+        if (_chain.length == 0) throw Error("No such blocks")
+
+        let ok = false
+
+        for (let blk of _chain) {
+            if (ok || blk.dataValues.hash === hash) {
+                let txs: ITransaction[] = []
+
+                for (let tx of blk.dataValues.Transactions) {
+                    txs.push(tx.dataValues)
+                }
+
+                let b: IBlock = blk.dataValues
+                b.data = txs
+                chain.push(b)
+            }
+        }
+
+        return chain
+    }
+
+    public async getTx(hash: string) {
+        let _tx = await this.db.models.Transaction.findOne({
+            where: {
+                hash
+            }
+        })
+
+        if (_tx) return <ITransaction>_tx.dataValues
+
+        let tx: ITransaction | undefined = this.mempool.find(v => v.hash == hash)
+
+        return tx
     }
 }

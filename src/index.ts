@@ -4,13 +4,15 @@ import { User } from "./libs/user";
 import experss from "express"
 import bodyParser from "body-parser";
 import path from "node:path";
-import { Transaction } from "./libs/transaction";
+import { ITransaction, Transaction } from "./libs/transaction";
 import { Event } from "./libs/event";
 import { Miner } from "./libs/miner";
-import { IBlock } from "./libs/block";
+import { Block, IBlock } from "./libs/block";
+import axios from "axios";
 
 let args = minimist(process.argv.slice(2))
 
+const NODE_HOST = "localhost"
 
 let event = new Event()
 
@@ -26,6 +28,69 @@ interface IData {
     error?: any,
     data: any
 }
+
+async function requestChain(hash: string) {
+    try {
+        let req = await axios.post(`http://${NODE_HOST}:${args.node}/request_chain/`, {
+            status: 0,
+            data: { hash }
+        })
+
+        if (req.data.data) {
+            let data: IData = req.data
+            let blocks: IBlock[] = data.data
+            event.emit("answerChain", blocks)
+        }
+    } catch (error) {
+
+    }
+
+}
+async function requestTx(hash: string) {
+    try {
+        let req = await axios.post(`http://${NODE_HOST}:${args.node}/request_tx/`, {
+            status: 0,
+            data: { hash }
+        })
+
+        if (req.data.data) {
+            let data: IData = req.data
+            let tx: ITransaction[] = data.data.tx
+            event.emit("answerTx", tx)
+        }
+    } catch (error) {
+
+    }
+
+}
+
+async function anonceBlock(hash: string) {
+    try {
+        let req = await axios.post(`http://${NODE_HOST}:${args.node}/anonce_block`, {
+            status: 0,
+            data: { hash }
+        })
+    } catch (e) {
+
+    }
+
+}
+async function anonceTx(hash: string) {
+    try {
+        let req = await axios.post(`http://${NODE_HOST}:${args.node}/anonce_tx`, {
+            status: 0,
+            data: { hash }
+        })
+    } catch (error) {
+
+    }
+
+}
+
+event.on("requectChain", requestChain)
+event.on("requectTx", requestTx)
+event.on("anonceBlock", anonceBlock)
+event.on("anonceTx", anonceTx)
 
 const app = experss()
 app.use(bodyParser.json())
@@ -118,34 +183,61 @@ app.post("/balance/", (req, res) => {
 {
     status: ??
     data: {
-        block: IBlock
+        hash - hash of anonced block
     }
 }
 
 */
 app.post("/anonce_block/", async (req, res) => {
-    let block: IBlock = req.body.data.block
-    let r = await chain.verifyBlock(block)
+    let data: IData = req.body
+    console.log(data)
+    if (await chain.checkNetBlock(data.data.hash)) {
+        event.emit("requestChain", data.data.hash)
+    }
 
-    if (!r) return res.send({
-        status: 1,
-        data: "",
-        error: "Block not valid!"
-    })
-
-
+    res.end()
 })
 
 
+/*
 
-app.post("/anonce_tx/", (req, res) => {
+{
+    status: ??
+    data: {
+        hash - hash of anonced tx
+    }
+}
 
+*/
+app.post("/anonce_tx/", async (req, res) => {
+    let data: IData = req.body
+    console.log(data)
+    if (await chain.checkNetTx(data.data.hash)) {
+        event.emit("requestTx", data.data.hash)
+    }
+
+    res.end()
+})
+
+app.post("/request_chain/", async (req, res) => {
+    res.send({
+        status: 0,
+        data: await chain.getChain(req.body.data.hash)
+    })
+})
+app.post("/request_tx/", async (req, res) => {
+    res.send({
+        status: 0,
+        data: await chain.getTx(req.body.data.hash)
+    })
 })
 
 
 async function start() {
-    await chain.init(miner.pow.bind(miner))
+    miner.pow()
     await app.listen(port)
     console.log("listening on ")
+    chain.getChain("00b205891055e955587dce89bd2ea087d1156a6f770204aade10f33a7a4826d0")
 }
-start()
+chain.init(start)
+
